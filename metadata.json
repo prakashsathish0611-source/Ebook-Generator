@@ -1,0 +1,6 @@
+{
+  "name": "FolioAI - AI eBook Studio & Publishing Suite",
+  "description": "Outline, write, format, and publish professional eBooks with AI. Export seamlessly to EPUB, PDF, and Markdown.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
