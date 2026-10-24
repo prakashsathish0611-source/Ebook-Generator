@@ -11,7 +11,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const port = 3000;
-const AI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const AI_MODEL = (process.env.GEMINI_MODEL || 'gemini-2.5-flash').trim();
 
 app.use(express.json({ limit: '20mb' }));
 
@@ -34,7 +34,9 @@ function cleanJsonString(raw: string): string {
   if (!raw) return '{}';
   let cleaned = raw.trim();
   if (cleaned.startsWith('```')) {
-    cleaned = cleaned.replace(/^```[a-zA-Z]*\n?/, '').replace(/\n?```$/, '');
+    cleaned = cleaned
+      .replace(/^```(?:json|JSON)?\s*/i, '')
+      .replace(/\s*```\s*$/, '');
   }
   return cleaned.trim();
 }
@@ -276,9 +278,20 @@ app.post('/api/book/generate-blueprint', async (req, res) => {
     customNotes = '',
   } = req.body;
 
-  if (!topic) {
+  if (!topic || !String(topic).trim()) {
     return res.status(400).json({ error: 'Book topic or premise is required' });
   }
+
+  const safeChapterCount = Math.min(12, Math.max(3, Number(targetChapterCount) || 6));
+
+  const fallback = generateProceduralBlueprint(
+    String(topic),
+    String(genre),
+    String(tone),
+    String(targetAudience),
+    safeChapterCount,
+    String(authorName || 'Author Name')
+  );
 
   // Attempt with Gemini AI if key is present
   if (hasApiKey) {
@@ -290,7 +303,7 @@ Genre: ${genre}
 Topic/Idea: "${topic}"
 Tone: ${tone}
 Target Audience: ${targetAudience}
-Target Chapter Count: ${targetChapterCount}
+Target Chapter Count: ${safeChapterCount}
 Author Name: ${authorName}
 Additional Notes: ${customNotes || 'None'}
 
@@ -314,11 +327,16 @@ Return a JSON object conforming exactly to this structure:
     }
   ]
 }
-Ensure exactly ${targetChapterCount} chapters are generated with clear narrative or conceptual progression.`;
+Ensure exactly ${safeChapterCount} chapters are generated with clear narrative or conceptual progression.`;
 
       const parsed = await generateGeminiJson<any>(prompt, null as any);
 
-      if (parsed && parsed.chapters && Array.isArray(parsed.chapters)) {
+      if (
+        parsed &&
+        typeof parsed === 'object' &&
+        Array.isArray(parsed.chapters) &&
+        parsed.chapters.length > 0
+      ) {
         parsed.chapters = parsed.chapters.map((ch: any, idx: number) => ({
           ...ch,
           id: `ch-${Date.now()}-${idx + 1}`,
@@ -334,7 +352,6 @@ Ensure exactly ${targetChapterCount} chapters are generated with clear narrative
   }
 
   // Seamless procedural fallback
-  const fallback = generateProceduralBlueprint(topic, genre, tone, targetAudience, targetChapterCount, authorName);
   return res.json({
     ...fallback,
     notice: 'Blueprint generated using FolioAI Manuscript Engine.',
@@ -386,7 +403,7 @@ Formatting Rules for professional e-book rendering:
 1. Start directly with the markdown formatted chapter.
 2. Include an evocative epigraph or introductory thought.
 3. Structure with Markdown headings (## and ###) for natural pacing.
-4. If Non-Fiction: Include compelling narratives, historical or real-world parallels, deep explanations, actionable frameworks, pull quotes (> quote), and a bulleted "Key Principles / Summary" section.
+4. If Non-Fiction: Include compelling narratives, historical or real-world parallels, deep explanations, actionable frameworks, pull quotes (> quote), and a bulleted "Key Principles / Summary" section[...]
 5. If Fiction / Memoir: Include vivid sensory prose, atmospheric pacing, rich dialogue, internalized thoughts, dramatic tension, and clear scene transitions using '***'.
 6. Do NOT output meta text or conversational chatter like "Here is your chapter". Start directly with '# Chapter ${chapterNumber}: ${chapterTitle}' or formatted chapter text.`;
 
@@ -480,7 +497,7 @@ Return ONLY the updated, complete chapter text in clean Markdown format. Do not 
   if (action === 'polish') {
     refined = content.replace(/\n\n/g, '\n\n').trim();
   } else if (action === 'expand') {
-    refined = content + `\n\n* * *\n\n## Extended Analysis & Further Exploration\n\nDeepening our inquiry reveals an additional dimension: when ideas are pressure-tested against edge cases, the underlying logic becomes more robust and more adaptable.`;
+    refined = content + `\n\n* * *\n\n## Extended Analysis & Further Exploration\n\nDeepening our inquiry reveals an additional dimension: when ideas are pressure-tested against edge cases, the underlying assumptions become more precise and more durable.`;
   } else if (action === 'shorten') {
     refined = content.replace(/\n{3,}/g, '\n\n').trim();
   }
