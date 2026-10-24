@@ -1,5 +1,5 @@
 import express from 'express';
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -11,21 +11,23 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const port = 3000;
+const AI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
 app.use(express.json({ limit: '20mb' }));
 
-// Initialize Google GenAI
-const apiKey = process.env.GEMINI_API_KEY || '';
-const ai = new GoogleGenAI({
-  apiKey: apiKey,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
-    },
-  },
-});
-
-const hasApiKey = Boolean(apiKey && apiKey !== 'MY_GEMINI_API_KEY');
+// Initialize Google GenAI only when a real key is present.
+const apiKey = process.env.GEMINI_API_KEY?.trim() || '';
+const ai = apiKey && apiKey !== 'MY_GEMINI_API_KEY'
+  ? new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    })
+  : null;
+const hasApiKey = Boolean(ai);
 
 // Helper to strip markdown code fences from JSON strings
 function cleanJsonString(raw: string): string {
@@ -37,6 +39,54 @@ function cleanJsonString(raw: string): string {
   return cleaned.trim();
 }
 
+function parseJsonSafely<T = any>(raw: string | undefined, fallback: T): T {
+  if (!raw) return fallback;
+
+  try {
+    return JSON.parse(cleanJsonString(raw)) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+async function generateGeminiText(prompt: string): Promise<string | null> {
+  if (!ai) return null;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: AI_MODEL,
+      contents: prompt,
+    });
+
+    if (response.text && response.text.trim().length > 50) {
+      return response.text;
+    }
+  } catch (error: any) {
+    console.warn('Gemini API request failed:', error?.message || error);
+  }
+
+  return null;
+}
+
+async function generateGeminiJson<T = any>(prompt: string, fallback: T): Promise<T> {
+  if (!ai) return fallback;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: AI_MODEL,
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json',
+      },
+    });
+
+    return parseJsonSafely<T>(response.text, fallback);
+  } catch (error: any) {
+    console.warn('Gemini JSON request failed:', error?.message || error);
+    return fallback;
+  }
+}
+
 // Procedural blueprint generator when AI quota is exhausted or offline
 function generateProceduralBlueprint(
   topic: string,
@@ -46,7 +96,8 @@ function generateProceduralBlueprint(
   targetChapterCount: number = 6,
   authorName: string = 'Author'
 ) {
-  const cleanTopic = topic.replace(/[#*`]/g, '').trim();
+  const safeTopic = String(topic ?? '').replace(/[#*`]/g, '').trim();
+  const cleanTopic = safeTopic || 'Untitled Topic';
   const capitalizedTopic = cleanTopic.charAt(0).toUpperCase() + cleanTopic.slice(1);
 
   // Genre-specific titles and themes (ensure Non-Fiction is not matched as fiction)
@@ -125,9 +176,9 @@ function generateProceduralChapter(
 
 > "The true map is never drawn upon paper. It is etched into the choices we make when the road vanishes before us."
 
-The silence in the air was heavier than the sea fog rolling over the iron eaves. Outside, the lanterns flickered against the wet cobblestones, casting long, wavering needles of amber light across the darkened alleyways.
+The silence in the air was heavier than the sea fog rolling over the iron eaves. Outside, the lanterns flickered against the wet cobblestones, casting long, wavering needles of amber light across the [...]
 
-Cassian stood motionless before the heavy oak table. The instruments laid before him hummed with an almost imperceptible vibration—a high, crystalline harmonic that resonated in the roots of his teeth.
+Cassian stood motionless before the heavy oak table. The instruments laid before him hummed with an almost imperceptible vibration—a high, crystalline harmonic that resonated in the roots of his tee[...]
 
 * * *
 
@@ -135,7 +186,7 @@ Cassian stood motionless before the heavy oak table. The instruments laid before
 
 "You shouldn't have brought that here," a low voice murmured from the doorway.
 
-Cassian didn't need to turn to know who it was. The scent of ozone and chilled rain preceded her like an advance scout. "If I hadn't brought it here, the city watch would have dredged it from the canal by dawn. Do you understand what this dial measures?"
+Cassian didn't need to turn to know who it was. The scent of ozone and chilled rain preceded her like an advance scout. "If I hadn't brought it here, the city watch would have dredged it from the cana[...]
 
 She stepped into the halo of the oil lamp. Her oilcloth cloak glistened with moisture, and beneath the visor of her brass goggles, her eyes fixed upon the interlocking gears.
 
@@ -149,7 +200,7 @@ She stepped into the halo of the oil lamp. Her oilcloth cloak glistened with moi
 
 The mechanism clicked—a sharp, mechanical snap that seemed to reverberate straight into the bedrock beneath the floorboards. 
 
-Outside, a sudden shockwave rippled across the harbor. The tide did not break against the piers; it locked into geometric crystalline ripples, as if the water itself had forgotten how to remain liquid.
+Outside, a sudden shockwave rippled across the harbor. The tide did not break against the piers; it locked into geometric crystalline ripples, as if the water itself had forgotten how to remain liquid[...]
 
 Cassian gathered the charts, his heart pounding in cadence with the ticking brass.
 
@@ -171,9 +222,9 @@ Cassian gathered the charts, his heart pounding in cadence with the ticking bras
 
 ## Introduction & First Principles
 
-When we analyze the landscape of **${bookTitle || 'this discipline'}**, we immediately encounter a recurring paradox: while tools evolve at an exponential velocity, the underlying human instincts that govern execution remain surprisingly constant.
+When we analyze the landscape of **${bookTitle || 'this discipline'}**, we immediately encounter a recurring paradox: while tools evolve at an exponential velocity, the underlying human instincts that[...]
 
-The objective of this chapter is to strip away superficial noise and establish an unyielding foundation. Whether you are navigating volatility, building scalable architectures, or refining your personal craft, the principles outlined here represent the load-bearing pillars of mastery.
+The objective of this chapter is to strip away superficial noise and establish an unyielding foundation. Whether you are navigating volatility, building scalable architectures, or refining your person[...]
 
 * * *
 
@@ -182,13 +233,13 @@ The objective of this chapter is to strip away superficial noise and establish a
 To transform theoretical insight into enduring, measurable outcomes, master practitioners rely on a triad of core dynamics:
 
 ### 1. Structural Intentionality
-Most failures do not occur at the point of execution; they are baked into the initial conditions. By rigorously defining your constraints, success metrics, and feedback loops before taking the first step, you eliminate 80% of downstream friction.
+Most failures do not occur at the point of execution; they are baked into the initial conditions. By rigorously defining your constraints, success metrics, and feedback loops before taking the first s[...]
 
 ### 2. Adaptive Feedback Loops
-Static plans crumble upon first contact with reality. The differentiator between amateurs and pioneers is the cycle time between hypothesis, observation, and recalibration. Shorten the loop, and you compound learning faster than your competitors can plan.
+Static plans crumble upon first contact with reality. The differentiator between amateurs and pioneers is the cycle time between hypothesis, observation, and recalibration. Shorten the loop, and you c[...]
 
 ### 3. Asymmetric Leverage
-Do not confuse activity with progress. Leverage is the art of identifying high-multiplier interventions—actions where a single unit of deliberate effort produces outsized, compounding returns over time.
+Do not confuse activity with progress. Leverage is the art of identifying high-multiplier interventions—actions where a single unit of deliberate effort produces outsized, compounding returns over t[...]
 
 * * *
 
@@ -196,9 +247,9 @@ Do not confuse activity with progress. Leverage is the art of identifying high-m
 
 > "Simplicity is not the lack of clutter; it is the presence of purpose."
 
-Consider how the most resilient organizations navigate inflection points. Rather than adding bureaucracy, they subtract friction. They create clarity of vision, empower decentralized decision-making, and protect the quiet focus required for deep work.
+Consider how the most resilient organizations navigate inflection points. Rather than adding bureaucracy, they subtract friction. They create clarity of vision, empower decentralized decision-making, [...]
 
-As you reflect on the ideas in this chapter, ask yourself: *Where in my current workflow am I substituting activity for leverage? What is the one structural bottleneck whose removal would unlock everything else?*
+As you reflect on the ideas in this chapter, ask yourself: *Where in my current workflow am I substituting activity for leverage? What is the one structural bottleneck whose removal would unlock every[...]
 
 * * *
 
@@ -265,26 +316,18 @@ Return a JSON object conforming exactly to this structure:
 }
 Ensure exactly ${targetChapterCount} chapters are generated with clear narrative or conceptual progression.`;
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: prompt,
-        config: {
-          responseMimeType: 'application/json',
-        },
-      });
+      const parsed = await generateGeminiJson<any>(prompt, null as any);
 
-      const parsed = JSON.parse(cleanJsonString(response.text || '{}'));
-
-      if (parsed.chapters && Array.isArray(parsed.chapters)) {
+      if (parsed && parsed.chapters && Array.isArray(parsed.chapters)) {
         parsed.chapters = parsed.chapters.map((ch: any, idx: number) => ({
           ...ch,
           id: `ch-${Date.now()}-${idx + 1}`,
           number: ch.number || idx + 1,
           content: ch.content || '',
         }));
-      }
 
-      return res.json(parsed);
+        return res.json(parsed);
+      }
     } catch (error: any) {
       console.warn('Gemini generate-blueprint error (falling back to procedural engine):', error.message || error);
     }
@@ -343,17 +386,13 @@ Formatting Rules for professional e-book rendering:
 1. Start directly with the markdown formatted chapter.
 2. Include an evocative epigraph or introductory thought.
 3. Structure with Markdown headings (## and ###) for natural pacing.
-4. If Non-Fiction: Include compelling narratives, historical or real-world parallels, deep explanations, actionable frameworks, pull quotes (> quote), and a bulleted "Key Principles / Summary" section at the end.
+4. If Non-Fiction: Include compelling narratives, historical or real-world parallels, deep explanations, actionable frameworks, pull quotes (> quote), and a bulleted "Key Principles / Summary" section.
 5. If Fiction / Memoir: Include vivid sensory prose, atmospheric pacing, rich dialogue, internalized thoughts, dramatic tension, and clear scene transitions using '***'.
 6. Do NOT output meta text or conversational chatter like "Here is your chapter". Start directly with '# Chapter ${chapterNumber}: ${chapterTitle}' or formatted chapter text.`;
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: prompt,
-      });
-
-      if (response.text && response.text.trim().length > 50) {
-        return res.json({ content: response.text });
+      const text = await generateGeminiText(prompt);
+      if (text) {
+        return res.json({ content: text });
       }
     } catch (error: any) {
       console.warn(`Gemini write-chapter ${chapterNumber} error (falling back to procedural engine):`, error.message || error);
@@ -427,13 +466,9 @@ ${content}
 
 Return ONLY the updated, complete chapter text in clean Markdown format. Do not add conversational framing.`;
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: prompt,
-      });
-
-      if (response.text && response.text.trim().length > 50) {
-        return res.json({ content: response.text });
+      const text = await generateGeminiText(prompt);
+      if (text) {
+        return res.json({ content: text });
       }
     } catch (error: any) {
       console.warn('Gemini refine-chapter error (falling back):', error.message || error);
@@ -445,9 +480,8 @@ Return ONLY the updated, complete chapter text in clean Markdown format. Do not 
   if (action === 'polish') {
     refined = content.replace(/\n\n/g, '\n\n').trim();
   } else if (action === 'expand') {
-    refined = content + `\n\n* * *\n\n## Extended Analysis & Further Exploration\n\nDeepening our inquiry reveals an additional dimension: when ideas are pressure-tested against edge cases, the underlying principles become self-evident.\n\n> "True mastery is revealed not in ordinary circumstances, but when the margin of error narrows to zero."\n\nEvery deliberate choice made throughout this process compounds, creating an enduring framework that withstands changing environments.`;
+    refined = content + `\n\n* * *\n\n## Extended Analysis & Further Exploration\n\nDeepening our inquiry reveals an additional dimension: when ideas are pressure-tested against edge cases, the underlying logic becomes more robust and more adaptable.`;
   } else if (action === 'shorten') {
-    // Trim extra spaces and tighten
     refined = content.replace(/\n{3,}/g, '\n\n').trim();
   }
 
@@ -459,15 +493,17 @@ app.post('/api/book/generate-cover-palette', async (req, res) => {
   try {
     const { title, genre, tone, description } = req.body;
 
+    const fallback = {
+      primaryColor: '#1e293b',
+      accentColor: '#f59e0b',
+      textColor: '#ffffff',
+      fontFamily: 'serif',
+      coverStyle: 'editorial',
+      visualMotif: 'Minimalist geometric geometry with gold foil accents',
+    };
+
     if (!hasApiKey) {
-      return res.json({
-        primaryColor: '#1e293b',
-        accentColor: '#f59e0b',
-        textColor: '#ffffff',
-        fontFamily: 'serif',
-        coverStyle: 'editorial',
-        visualMotif: 'Minimalist geometric geometry with gold foil accents',
-      });
+      return res.json(fallback);
     }
 
     const prompt = `Suggest a publication-ready color palette and cover motif for this book:
@@ -486,14 +522,10 @@ Return a JSON object:
   "visualMotif": "Brief description of the symbolic graphic or aesthetic pattern for the cover"
 }`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: prompt,
-      config: { responseMimeType: 'application/json' },
-    });
-
-    res.json(JSON.parse(response.text || '{}'));
+    const palette = await generateGeminiJson(prompt, fallback);
+    res.json(palette);
   } catch (error: any) {
+    console.warn('Cover palette generation failed:', error?.message || error);
     res.json({
       primaryColor: '#1c1917',
       accentColor: '#d97706',
